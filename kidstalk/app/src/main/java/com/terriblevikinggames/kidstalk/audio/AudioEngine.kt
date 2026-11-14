@@ -101,8 +101,20 @@ object AudioEngine {
         val appContext = context.applicationContext
         synchronized(lock) {
             if (sessionJob?.isActive == true) return
+            // Set synchronously so observers never see a stale Error from the
+            // previous session after asking for a new one.
+            _state.value = State.Starting
             sessionJob = scope.launch {
-                sessionMutex.withLock { runSession(appContext) }
+                var ran = false
+                try {
+                    sessionMutex.withLock {
+                        ran = true
+                        runSession(appContext)
+                    }
+                } finally {
+                    // Cancelled before the session began: undo the Starting above.
+                    if (!ran) _state.value = State.Idle
+                }
             }
         }
     }
