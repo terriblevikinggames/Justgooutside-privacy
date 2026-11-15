@@ -11,6 +11,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.terriblevikinggames.kidstalk.audio.AudioEngine
+import com.terriblevikinggames.kidstalk.headset.HeadsetButtonController
 import com.terriblevikinggames.kidstalk.service.KidsModePermissions
 import com.terriblevikinggames.kidstalk.service.KidsModeService
 import kotlinx.coroutines.flow.combine
@@ -58,14 +59,24 @@ class MainActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                combine(AudioEngine.state, AudioEngine.isKidsMicMuted) { state, muted ->
-                    when (state) {
+                combine(
+                    AudioEngine.state,
+                    AudioEngine.isKidsMicMuted,
+                    AudioEngine.voiceLinkUp,
+                    HeadsetButtonController.events,
+                ) { state, muted, linkUp, buttons ->
+                    val headline = when (state) {
                         AudioEngine.State.Idle -> "Stopped"
                         AudioEngine.State.Starting -> "Connecting to headset…"
                         AudioEngine.State.Running ->
                             if (muted) "Running — kids' mic muted" else "Running — kids' mic live"
                         is AudioEngine.State.Error -> "Error: ${state.message}"
                     }
+                    val link = if (state == AudioEngine.State.Running) {
+                        if (linkUp) "Headset voice link: up" else "Headset voice link: DROPPED"
+                    } else ""
+                    "$headline\n$link\nButton presses received: ${buttons.count}" +
+                        " (last: ${buttons.lastKey ?: "none"})"
                 }.collect { status.text = it }
             }
         }

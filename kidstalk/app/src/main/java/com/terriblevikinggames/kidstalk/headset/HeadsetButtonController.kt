@@ -54,6 +54,10 @@ class HeadsetButtonController(
             val event = IntentCompat.getParcelableExtra(
                 mediaButtonEvent, Intent.EXTRA_KEY_EVENT, KeyEvent::class.java
             ) ?: return false
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                val name = KeyEvent.keyCodeToString(event.keyCode).removePrefix("KEYCODE_")
+                buttonEvents.update { ButtonEvents(it.count + 1, name) }
+            }
             if (event.keyCode !in TOGGLE_KEYS) return false
 
             // Act once per press: ignore the key-up and auto-repeats, but still
@@ -111,15 +115,21 @@ class HeadsetButtonController(
         audioManager.abandonAudioFocusRequest(focusRequest)
     }
 
-    private companion object {
-        const val TAG = "HeadsetButton"
+    /** How many headset key presses have reached the app, and the latest key. */
+    data class ButtonEvents(val count: Int = 0, val lastKey: String? = null)
+
+    companion object {
+        private const val TAG = "HeadsetButton"
+
+        private val buttonEvents = MutableStateFlow(ButtonEvents())
+        val events: StateFlow<ButtonEvents> = buttonEvents.asStateFlow()
 
         /**
          * PLAY and PAUSE are included because many earbuds send the discrete
          * AVRCP key matching the state they think the player is in, not
          * PLAY_PAUSE.
          */
-        val TOGGLE_KEYS = setOf(
+        private val TOGGLE_KEYS = setOf(
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
             KeyEvent.KEYCODE_HEADSETHOOK,
             KeyEvent.KEYCODE_MEDIA_PLAY,

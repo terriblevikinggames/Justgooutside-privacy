@@ -85,6 +85,10 @@ object AudioEngine {
      */
     val isKidsMicMuted = MutableStateFlow(false)
 
+    /** False if the headset's voice link has dropped while the engine is running. */
+    private val _voiceLinkUp = MutableStateFlow(false)
+    val voiceLinkUp: StateFlow<Boolean> = _voiceLinkUp.asStateFlow()
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** Serialises sessions so a restart waits for the previous teardown. */
@@ -198,6 +202,19 @@ object AudioEngine {
             coroutineScope {
                 launch { pump("phone->kids", phoneMic, kidsSpeaker) }
                 launch { pump("kids->phone", kidsMic, phoneSpeaker) { isKidsMicMuted.value } }
+                // Watch the voice link: a headset can close it itself (e.g. a
+                // tap interpreted as "hang up"), which silences its mic
+                // without any read error.
+                launch {
+                    while (true) {
+                        val up = am.communicationDevice?.id == commDevice.id
+                        if (up != _voiceLinkUp.value) {
+                            Log.w(TAG, "Bluetooth voice link ${if (up) "up" else "DROPPED"}")
+                            _voiceLinkUp.value = up
+                        }
+                        delay(500)
+                    }
+                }
                 // AudioRecord.read() blocks and cannot see cancellation, so on
                 // cancel stop the records to kick both pumps out of read().
                 launch {
@@ -220,6 +237,7 @@ object AudioEngine {
                 am.clearCommunicationDevice()
                 am.mode = previousMode
                 _routing.value = null
+                _voiceLinkUp.value = false
                 _state.value = failure?.let { State.Error(it) } ?: State.Idle
             }
         }
@@ -311,7 +329,11 @@ object AudioEngine {
             val read = record.read(buffer, 0, buffer.size)
             currentCoroutineContext().ensureActive()
             if (read < 0) throw IOException("$name: AudioRecord.read failed ($read)")
-            if (read == 0 || muted()) continue
+            if (read == 0) continue
+            // Muted: play silence rather than nothing. A starved track stops
+            // counting as playback, and the OS then stops routing headset
+            // button presses to this app - so the unmute tap never arrives.
+            if (muted()) buffer.fill(0, 0, read)
             val written = track.write(buffer, 0, read)
             if (written < 0) throw IOException("$name: AudioTrack.write failed ($written)")
         }
